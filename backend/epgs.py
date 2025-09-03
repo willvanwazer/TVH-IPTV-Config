@@ -250,8 +250,54 @@ async def store_epg_programmes(config, epg_id, channel_id_list):
                 categories = []
                 for category in programme.findall("category"):
                     categories.append(category.text)
-                # TODO: Import rating
-                # TODO: Import star rating
+                # Optional metadata fields
+                summary = programme.findtext("summary", default=None)
+                keywords_list = [k.text for k in programme.findall("keyword") if k.text]
+                keywords = json.dumps(keywords_list) if keywords_list else None
+                credits = {}
+                credits_el = programme.find("credits")
+                if credits_el is not None:
+                    for role_el in credits_el:
+                        role = role_el.tag
+                        if role_el.text:
+                            credits.setdefault(role, []).append(role_el.text)
+                credits_json = json.dumps(credits) if credits else None
+                video_colour = video_aspect = video_quality = None
+                video_el = programme.find("video")
+                if video_el is not None:
+                    video_colour = video_el.findtext("colour", default=None)
+                    video_aspect = video_el.findtext("aspect", default=None)
+                    video_quality = video_el.findtext("quality", default=None)
+                subtitles_type = None
+                subtitles_el = programme.find("subtitles")
+                if subtitles_el is not None:
+                    subtitles_type = subtitles_el.attrib.get("type")
+                audio_described = True if programme.find("audio-described") is not None else None
+                previously_shown_date = None
+                ps_el = programme.find("previously-shown")
+                if ps_el is not None:
+                    previously_shown_date = ps_el.attrib.get("start")
+                premiere = True if programme.find("premiere") is not None else None
+                is_new = True if programme.find("new") is not None else None
+                epnum_onscreen = epnum_xmltv_ns = epnum_dd_progid = None
+                for epnum_el in programme.findall("episode-num"):
+                    system = epnum_el.attrib.get("system")
+                    if system == "onscreen":
+                        epnum_onscreen = epnum_el.text
+                    elif system == "xmltv_ns":
+                        epnum_xmltv_ns = epnum_el.text
+                    elif system == "dd_progid":
+                        epnum_dd_progid = epnum_el.text
+                star_rating = None
+                star_el = programme.find("star-rating")
+                if star_el is not None:
+                    star_rating = star_el.findtext("value", default=None)
+                production_year = programme.findtext("date", default=None)
+                rating_system = rating_value = None
+                rating_el = programme.find("rating")
+                if rating_el is not None:
+                    rating_system = rating_el.attrib.get("system")
+                    rating_value = rating_el.findtext("value", default=None)
                 # Create new line entry for the programmes table
                 items.append(
                     EpgChannelProgrammes(
@@ -267,7 +313,25 @@ async def store_epg_programmes(config, epg_id, channel_id_list):
                         stop=stop,
                         start_timestamp=start_timestamp,
                         stop_timestamp=stop_timestamp,
-                        categories=json.dumps(categories)
+                        categories=json.dumps(categories),
+                        summary=summary,
+                        keywords=keywords,
+                        credits_json=credits_json,
+                        video_colour=video_colour,
+                        video_aspect=video_aspect,
+                        video_quality=video_quality,
+                        subtitles_type=subtitles_type,
+                        audio_described=audio_described,
+                        previously_shown_date=previously_shown_date,
+                        premiere=premiere,
+                        is_new=is_new,
+                        epnum_onscreen=epnum_onscreen,
+                        epnum_xmltv_ns=epnum_xmltv_ns,
+                        epnum_dd_progid=epnum_dd_progid,
+                        star_rating=star_rating,
+                        production_year=production_year,
+                        rating_system=rating_system,
+                        rating_value=rating_value,
                     )
                 )
         logger.info("Saving new programmes list for EPG #%s from path - '%s'", epg_id, xmltv_file)
@@ -371,8 +435,8 @@ async def build_custom_epg(config):
                     'icon_url':              programme.icon_url,
                     'categories':            json.loads(programme.categories),
                     'summary':               programme.summary,
-                    'keywords':              programme.keywords,  # JSON encoded list
-                    'credits_json':          programme.credits_json,
+                    'keywords':              json.loads(programme.keywords) if programme.keywords else None,
+                    'credits':               json.loads(programme.credits_json) if programme.credits_json else None,
                     'video_colour':          programme.video_colour,
                     'video_aspect':          programme.video_aspect,
                     'video_quality':         programme.video_quality,
@@ -451,28 +515,22 @@ async def build_custom_epg(config):
                 output_child.set('width', "")
             # Keywords
             if epg_channel_programme.get('keywords'):
-                try:
-                    for kw in json.loads(epg_channel_programme['keywords']):
-                        if kw:
-                            kc = ET.SubElement(output_programme, 'keyword')
-                            kc.text = kw
-                            kc.set('lang', 'en')
-                except Exception:
-                    pass
+                for kw in epg_channel_programme['keywords']:
+                    if kw:
+                        kc = ET.SubElement(output_programme, 'keyword')
+                        kc.text = kw
+                        kc.set('lang', 'en')
             # Credits
-            if epg_channel_programme.get('credits_json'):
-                try:
-                    credits_data = json.loads(epg_channel_programme['credits_json'])
-                    if isinstance(credits_data, dict) and credits_data:
-                        credits_el = ET.SubElement(output_programme, 'credits')
-                        for role, people in credits_data.items():
-                            if not people:
-                                continue
-                            for person in people:
-                                pe = ET.SubElement(credits_el, role)
-                                pe.text = person
-                except Exception:
-                    pass
+            if epg_channel_programme.get('credits'):
+                credits_data = epg_channel_programme['credits']
+                if isinstance(credits_data, dict) and credits_data:
+                    credits_el = ET.SubElement(output_programme, 'credits')
+                    for role, people in credits_data.items():
+                        if not people:
+                            continue
+                        for person in people:
+                            pe = ET.SubElement(credits_el, role)
+                            pe.text = person
             # Video
             if any(epg_channel_programme.get(k) for k in ['video_colour','video_aspect','video_quality']):
                 video_el = ET.SubElement(output_programme, 'video')
